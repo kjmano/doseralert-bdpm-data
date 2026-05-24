@@ -1,0 +1,10 @@
+{
+  "version": "2026-05-24",
+  "count": 15049,
+  "hash": "aa5971ff44ed7d5c",
+  "generatedAt": "2026-05-24T00:13:03.231Z",
+  "files": {
+    "slim": "medications.min.json",
+    "full": "medications.full.json"
+  }
+}
