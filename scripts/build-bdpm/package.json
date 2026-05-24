@@ -1,0 +1,13 @@
+{
+  "name": "build-bdpm",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Generate a JSON snapshot of the French BDPM (medicines DB) for the Doser Alert mobile app.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

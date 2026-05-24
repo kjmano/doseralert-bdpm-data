@@ -1,0 +1,112 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# bdpm-monthly — Snapshot mensuel automatisé de la BDPM.
+#
+# - Cron : 1er du mois à 02:00 UTC
+# - Manuel : Actions → "BDPM monthly snapshot" → Run workflow
+# - Compare le hash avec la version précédente ; ne pousse que si différent.
+# - Tag : v<YYYY-MM-DD> sur chaque snapshot publié.
+# - Purge le cache jsDelivr pour propagation immédiate sur le CDN.
+#
+# Aucun secret à configurer — utilise GITHUB_TOKEN natif (workflow in-repo).
+# ─────────────────────────────────────────────────────────────────────────────
+name: BDPM monthly snapshot
+
+on:
+  schedule:
+    - cron: '0 2 1 * *'   # 1er du mois, 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force publish même si hash identique'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build BDPM snapshot
+        run: node scripts/build-bdpm/build.mjs
+
+      - name: Diff with previous version
+        id: diff
+        run: |
+          NEW_HASH=$(jq -r '.hash' scripts/build-bdpm/out/version.json)
+          OLD_HASH=$(jq -r '.hash // empty' version.json 2>/dev/null || true)
+          NEW_VERSION=$(jq -r '.version' scripts/build-bdpm/out/version.json)
+          NEW_COUNT=$(jq -r '.count' scripts/build-bdpm/out/version.json)
+          echo "new_hash=$NEW_HASH" >> $GITHUB_OUTPUT
+          echo "old_hash=$OLD_HASH" >> $GITHUB_OUTPUT
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "count=$NEW_COUNT" >> $GITHUB_OUTPUT
+          if [ "$NEW_HASH" = "$OLD_HASH" ] && [ "${{ inputs.force }}" != "true" ]; then
+            echo "unchanged=true" >> $GITHUB_OUTPUT
+            echo "✋ Aucun changement (hash identique : $NEW_HASH)"
+          else
+            echo "unchanged=false" >> $GITHUB_OUTPUT
+            echo "🆕 Nouvelle version : $OLD_HASH → $NEW_HASH"
+          fi
+
+      - name: Copy artifacts to repo root
+        if: steps.diff.outputs.unchanged != 'true'
+        run: |
+          cp scripts/build-bdpm/out/medications.min.json   ./
+          cp scripts/build-bdpm/out/medications.full.json  ./
+          cp scripts/build-bdpm/out/version.json           ./
+
+      - name: Commit and push
+        if: steps.diff.outputs.unchanged != 'true'
+        run: |
+          git config user.name  'doser-alert-bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add medications.min.json medications.full.json version.json
+          git commit -m "chore(bdpm): snapshot ${{ steps.diff.outputs.version }} (${{ steps.diff.outputs.new_hash }})
+
+          ${{ steps.diff.outputs.count }} médicaments — Base de Données Publique des Médicaments
+          Source : ANSM/HAS/Ameli — Licence Ouverte Etalab v2.0"
+          # Tag (idempotent : si déjà existant, on saute)
+          if ! git rev-parse "v${{ steps.diff.outputs.version }}" >/dev/null 2>&1; then
+            git tag -a "v${{ steps.diff.outputs.version }}" -m "BDPM ${{ steps.diff.outputs.version }}"
+          fi
+          git push origin HEAD --tags
+
+      - name: Purge jsDelivr CDN cache
+        if: steps.diff.outputs.unchanged != 'true'
+        run: |
+          curl -fsS "https://purge.jsdelivr.net/gh/kjmano/doseralert-bdpm-data@main/version.json"          || true
+          curl -fsS "https://purge.jsdelivr.net/gh/kjmano/doseralert-bdpm-data@main/medications.min.json" || true
+          curl -fsS "https://purge.jsdelivr.net/gh/kjmano/doseralert-bdpm-data@main/medications.full.json" || true
+
+      - name: Summary
+        run: |
+          echo "## 📦 BDPM Snapshot" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Champ | Valeur |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version     | \`${{ steps.diff.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Médicaments | ${{ steps.diff.outputs.count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Hash        | \`${{ steps.diff.outputs.new_hash }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Hash précéd.| \`${{ steps.diff.outputs.old_hash }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.diff.outputs.unchanged }}" = "true" ]; then
+            echo "| État        | ❌ Aucun changement — non publié |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| État        | ✅ Publié + CDN purgé |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**CDN URLs :**" >> $GITHUB_STEP_SUMMARY
+            echo "- https://cdn.jsdelivr.net/gh/kjmano/doseralert-bdpm-data@main/version.json" >> $GITHUB_STEP_SUMMARY
+            echo "- https://cdn.jsdelivr.net/gh/kjmano/doseralert-bdpm-data@main/medications.min.json" >> $GITHUB_STEP_SUMMARY
+          fi
