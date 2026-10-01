@@ -1,8 +1,8 @@
 {
-  "version": "2026-09-01",
-  "count": 15109,
-  "hash": "00c9a3e7919a9ffc",
-  "generatedAt": "2026-09-01T06:55:29.577Z",
+  "version": "2026-10-01",
+  "count": 15145,
+  "hash": "53c754e8b80917f4",
+  "generatedAt": "2026-10-01T07:56:13.656Z",
   "files": {
     "slim": "medications.min.json",
     "full": "medications.full.json"
